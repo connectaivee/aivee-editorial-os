@@ -1,24 +1,68 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   FileText, Search, CheckCircle2, Clock, AlertCircle, 
-  ChevronRight, Star, Link as LinkIcon, Sparkles, Eye, Edit
+  ChevronRight, Star, Link as LinkIcon, Sparkles, Eye, Edit, Loader2
 } from 'lucide-react';
-import { editorialData } from '@/lib/mock-data';
-import { Issue } from '@/lib/types';
+import { useRouter } from 'next/navigation';
+import { supabase, isSupabaseConfigured } from '@/lib/db';
 
 type TabType = 'overview' | 'draft' | 'sources' | 'promotion';
 
 export function IssueWorkspacePage({ issueId }: { issueId: string }) {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
-  
-  const issue = editorialData.issues.find(i => i.id === issueId) || editorialData.issues[0];
-  const stories = editorialData.stories.filter(s => s.issue_id === issueId);
+  const [issue, setIssue] = useState<any>(null);
+  const [stories, setStories] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const router = useRouter();
+
+  useEffect(() => {
+    async function loadData() {
+      if (isSupabaseConfigured && supabase) {
+        const [issueRes, storiesRes] = await Promise.all([
+          supabase.from('issues').select('*').eq('id', issueId).single(),
+          supabase.from('stories').select('*').eq('issue_id', issueId)
+        ]);
+        if (issueRes.data) setIssue(issueRes.data);
+        if (storiesRes.data) setStories(storiesRes.data);
+      }
+      setLoading(false);
+    }
+    loadData();
+  }, [issueId]);
+
+  const handleApprove = async () => {
+    if (!supabase || !issue) return;
+    await supabase.from('issues').update({ status: 'approved', linkedin_status: 'approved' }).eq('id', issue.id);
+    setIssue({ ...issue, status: 'approved', linkedin_status: 'approved' });
+    alert('Issue approved! LinkedIn post also approved.');
+  };
+
+  const handlePublish = async () => {
+    if (!supabase || !issue) return;
+    await supabase.from('issues').update({ status: 'published', linkedin_status: 'published' }).eq('id', issue.id);
+    setIssue({ ...issue, status: 'published', linkedin_status: 'published' });
+    alert('Issue published!');
+  };
+
+  if (loading) {
+    return (
+      <div className="flex h-96 items-center justify-center">
+        <Loader2 className="animate-spin text-[var(--accent)]" size={32} />
+      </div>
+    );
+  }
+
+  if (!issue) {
+    return (
+      <div className="flex h-96 items-center justify-center">
+        <p className="text-[var(--text-muted)]">Issue not found</p>
+      </div>
+    );
+  }
+
   const shortlistedStories = stories.filter(s => s.disposition === 'use_this_week');
-  const linkedinPost = editorialData.linkedinPosts.find(p => p.issue_id === issueId);
-  const reviewItems = editorialData.reviewItems.filter(r => r.issue_id === issueId);
-  const checklist = editorialData.checklist.filter(c => c.issue_id === issueId);
 
   const tabs = [
     { id: 'overview', label: 'Overview' },
@@ -42,14 +86,26 @@ export function IssueWorkspacePage({ issueId }: { issueId: string }) {
             {issue.subtitle && <p className="text-[var(--text-secondary)]">{issue.subtitle}</p>}
           </div>
           <div className="flex items-center gap-3">
-            <button className="flex items-center gap-2 rounded-lg border border-[var(--line)] bg-[var(--bg-soft)] px-4 py-2 text-sm hover:bg-[var(--line)]">
-              <Eye size={16} />
-              Preview
-            </button>
-            <button className="flex items-center gap-2 rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--bg)] hover:bg-[var(--accent-strong)]">
-              <CheckCircle2 size={16} />
-              Mark Approved
-            </button>
+            {issue.status === 'in_review' && (
+              <>
+                <button 
+                  onClick={handleApprove}
+                  className="flex items-center gap-2 rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--bg)] hover:bg-[var(--accent-strong)]"
+                >
+                  <CheckCircle2 size={16} />
+                  Mark Approved
+                </button>
+              </>
+            )}
+            {issue.status === 'approved' && (
+              <button 
+                onClick={handlePublish}
+                className="flex items-center gap-2 rounded-lg bg-green-500 px-4 py-2 text-sm font-medium text-white hover:bg-green-600"
+              >
+                <FileText size={16} />
+                Publish Issue
+              </button>
+            )}
           </div>
         </div>
 
@@ -74,7 +130,7 @@ export function IssueWorkspacePage({ issueId }: { issueId: string }) {
       {/* Content */}
       <div className="p-8">
         {activeTab === 'overview' && (
-          <OverviewTab issue={issue} stories={shortlistedStories} reviewItems={reviewItems} checklist={checklist} />
+          <OverviewTab issue={issue} stories={shortlistedStories} />
         )}
         {activeTab === 'draft' && (
           <DraftTab issue={issue} stories={shortlistedStories} />
@@ -83,7 +139,7 @@ export function IssueWorkspacePage({ issueId }: { issueId: string }) {
           <SourcesTab stories={stories} />
         )}
         {activeTab === 'promotion' && (
-          <PromotionTab post={linkedinPost} />
+          <PromotionTab issue={issue} />
         )}
       </div>
     </div>
@@ -106,12 +162,7 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-function OverviewTab({ issue, stories, reviewItems, checklist }: { 
-  issue: Issue; 
-  stories: any[]; 
-  reviewItems: any[];
-  checklist: any[];
-}) {
+function OverviewTab({ issue, stories }: { issue: any; stories: any[] }) {
   return (
     <div className="grid grid-cols-3 gap-6">
       <div className="col-span-2 space-y-6">
@@ -139,58 +190,37 @@ function OverviewTab({ issue, stories, reviewItems, checklist }: {
 
         <div className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] p-6">
           <h3 className="mb-4 text-lg font-medium">Selected Stories ({stories.length})</h3>
-          <div className="space-y-3">
-            {stories.map((story, idx) => (
-              <div key={story.id} className="flex items-center gap-3 rounded-lg bg-[var(--bg-soft)] p-3">
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--accent)]/10 text-xs font-medium text-[var(--accent)]">
-                  {idx + 1}
-                </span>
-                <div className="flex-1">
-                  <p className="text-sm font-medium">{story.title}</p>
-                  <p className="text-xs text-[var(--text-muted)]">{story.source_name}</p>
-                </div>
-                <span className="text-sm font-medium text-[var(--accent)]">{story.overall_score?.toFixed(1)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div className="space-y-6">
-        <div className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] p-6">
-          <h3 className="mb-4 text-lg font-medium">Review Queue</h3>
-          {reviewItems.length === 0 ? (
-            <p className="text-sm text-[var(--text-muted)]">No pending reviews</p>
+          {stories.length === 0 ? (
+            <p className="text-sm text-[var(--text-muted)]">No stories selected yet.</p>
           ) : (
             <div className="space-y-3">
-              {reviewItems.map(item => (
-                <div key={item.id} className="flex items-start gap-2 rounded-lg bg-[var(--bg-soft)] p-3">
-                  <AlertCircle size={14} className={item.priority === 'critical' ? 'text-red-400 mt-0.5' : 'text-yellow-400 mt-0.5'} />
-                  <div>
-                    <p className="text-sm font-medium">{item.label}</p>
-                    <p className="text-xs text-[var(--text-muted)]">{item.description}</p>
+              {stories.map((story, idx) => (
+                <div key={story.id} className="flex items-center gap-3 rounded-lg bg-[var(--bg-soft)] p-3">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--accent)]/10 text-xs font-medium text-[var(--accent)]">
+                    {idx + 1}
+                  </span>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium">{story.title}</p>
+                    <p className="text-xs text-[var(--text-muted)]">{story.source_name}</p>
                   </div>
+                  <span className="text-sm font-medium text-[var(--accent)]">{Number(story.overall_score || 0).toFixed(1)}</span>
                 </div>
               ))}
             </div>
           )}
         </div>
+      </div>
 
+      <div className="space-y-6">
         <div className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] p-6">
-          <h3 className="mb-4 text-lg font-medium">Checklist</h3>
+          <h3 className="mb-4 text-lg font-medium">Status Timeline</h3>
           <div className="space-y-2">
-            {checklist.map(item => (
-              <div key={item.id} className="flex items-center gap-2">
-                {item.is_complete ? (
-                  <CheckCircle2 size={16} className="text-green-400" />
-                ) : (
-                  <Clock size={16} className="text-[var(--text-muted)]" />
-                )}
-                <span className={`text-sm ${item.is_complete ? 'text-[var(--text-secondary)]' : 'text-[var(--text-muted)]'}`}>
-                  {item.item_label}
-                </span>
-              </div>
-            ))}
+            <TimelineStep label="Collecting Signals" completed />
+            <TimelineStep label="Shortlisting" completed />
+            <TimelineStep label="Drafting" completed />
+            <TimelineStep label="In Review" active={issue.status === 'in_review'} />
+            <TimelineStep label="Approved" completed={issue.status === 'approved' || issue.status === 'published'} />
+            <TimelineStep label="Published" completed={issue.status === 'published'} />
           </div>
         </div>
       </div>
@@ -198,17 +228,20 @@ function OverviewTab({ issue, stories, reviewItems, checklist }: {
   );
 }
 
-function DraftTab({ issue, stories }: { issue: Issue; stories: any[] }) {
+function TimelineStep({ label, completed, active }: { label: string; completed?: boolean; active?: boolean }) {
+  return (
+    <div className="flex items-center gap-2">
+      <div className={`h-2 w-2 rounded-full ${completed ? 'bg-green-400' : active ? 'bg-[var(--accent)]' : 'bg-[var(--line)]'}`} />
+      <span className={`text-sm ${completed || active ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'}`}>{label}</span>
+    </div>
+  );
+}
+
+function DraftTab({ issue, stories }: { issue: any; stories: any[] }) {
   return (
     <div className="space-y-6">
       <div className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] p-6">
-        <div className="mb-6 flex items-center justify-between">
-          <h3 className="text-lg font-medium">Newsletter Draft</h3>
-          <button className="flex items-center gap-2 rounded-lg bg-[var(--bg-soft)] px-3 py-1.5 text-sm hover:bg-[var(--line)]">
-            <Sparkles size={14} />
-            Regenerate with AI
-          </button>
-        </div>
+        <h3 className="mb-4 text-lg font-medium">Newsletter Draft</h3>
         
         <div className="prose prose-invert max-w-none">
           <h1 className="text-2xl font-semibold">{issue.title}</h1>
@@ -247,69 +280,68 @@ function SourcesTab({ stories }: { stories: any[] }) {
     <div className="space-y-6">
       <div className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] p-6">
         <h3 className="mb-4 text-lg font-medium">Sources Used</h3>
-        <div className="space-y-3">
-          {stories.map(story => (
-            <div key={story.id} className="flex items-center gap-4 rounded-lg bg-[var(--bg-soft)] p-4">
-              <LinkIcon size={16} className="text-[var(--text-muted)]" />
-              <div className="flex-1">
-                <p className="font-medium">{story.source_name}</p>
-                <a href={story.source_url} target="_blank" rel="noopener noreferrer" className="text-xs text-[var(--accent)] hover:underline">
-                  {story.source_url}
-                </a>
+        {stories.length === 0 ? (
+          <p className="text-sm text-[var(--text-muted)]">No sources yet.</p>
+        ) : (
+          <div className="space-y-3">
+            {stories.map(story => (
+              <div key={story.id} className="flex items-center gap-4 rounded-lg bg-[var(--bg-soft)] p-4">
+                <LinkIcon size={16} className="text-[var(--text-muted)]" />
+                <div className="flex-1">
+                  <p className="font-medium">{story.source_name}</p>
+                  {story.source_url && (
+                    <a href={story.source_url} target="_blank" rel="noopener noreferrer" className="text-xs text-[var(--accent)] hover:underline">
+                      {story.source_url}
+                    </a>
+                  )}
+                </div>
+                <span className="text-xs text-[var(--text-muted)]">{story.published_date}</span>
               </div>
-              <span className="text-xs text-[var(--text-muted)]">{story.published_date}</span>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function PromotionTab({ post }: { post: any }) {
-  if (!post) {
-    return (
-      <div className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] p-6">
-        <p className="text-[var(--text-muted)]">No LinkedIn post generated yet.</p>
-      </div>
-    );
-  }
+function PromotionTab({ issue }: { issue: any }) {
+  const linkedinStatus = issue.linkedin_status || 'not_started';
 
   return (
     <div className="space-y-6">
       <div className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] p-6">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-lg font-medium">LinkedIn Post</h3>
-          <button className="flex items-center gap-2 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-[var(--bg)]">
-            <Edit size={14} />
-            Edit
-          </button>
+          <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+            linkedinStatus === 'published' ? 'bg-green-500/10 text-green-400' :
+            linkedinStatus === 'approved' ? 'bg-blue-500/10 text-blue-400' :
+            linkedinStatus === 'drafted' ? 'bg-yellow-500/10 text-yellow-400' :
+            'bg-gray-500/10 text-gray-400'
+          }`}>
+            {linkedinStatus.replace('_', ' ')}
+          </span>
         </div>
         
-        <div className="rounded-lg bg-[var(--bg-soft)] p-4 whitespace-pre-wrap text-sm">{post.main_post}</div>
+        {linkedinStatus === 'not_started' ? (
+          <p className="text-[var(--text-muted)]">LinkedIn post not yet generated.</p>
+        ) : (
+          <div className="rounded-lg bg-[var(--bg-soft)] p-4 text-sm whitespace-pre-wrap">
+{`🚨 The BIM platform consolidation is happening faster than expected.
 
-        <div className="mt-6 grid grid-cols-3 gap-4">
-          <div>
-            <p className="mb-2 text-xs font-medium text-[var(--text-muted)]">Hook Variants</p>
-            <div className="space-y-2">
-              {[post.hook_variant_1, post.hook_variant_2, post.hook_variant_3].map((hook, i) => (
-                <div key={i} className="rounded bg-[var(--bg-soft)] p-2 text-xs">{hook}</div>
-              ))}
-            </div>
+Autodesk just folded Construction Cloud into Forma. Tekla added AI without rewriting everything. Kazakhstan went digital in one move.
+
+What does this mean for you?
+
+1. If you're on Autodesk → you're now on Forma. Start learning it.
+2. If you're on Tekla → AI is coming incrementally, not as a revolution.
+3. If you do international work → emerging markets are skipping legacy workflows.
+
+The next 12 months will sort out who's adapted and who hasn't.
+
+🔗 Subscribe to Aivee Weekly for practical BIM and AI insights delivered every Sunday.`}
           </div>
-          <div>
-            <p className="mb-2 text-xs font-medium text-[var(--text-muted)]">CTA Variants</p>
-            <div className="space-y-2">
-              {[post.cta_variant_1, post.cta_variant_2].map((cta, i) => (
-                <div key={i} className="rounded bg-[var(--bg-soft)] p-2 text-xs">{cta}</div>
-              ))}
-            </div>
-          </div>
-          <div>
-            <p className="mb-2 text-xs font-medium text-[var(--text-muted)]">Hashtags</p>
-            <div className="rounded bg-[var(--bg-soft)] p-2 text-xs text-[var(--text-secondary)]">{post.hashtags}</div>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );
