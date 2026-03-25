@@ -1,8 +1,8 @@
 'use client';
 
-import { Search, Filter, CheckCircle2, Clock, X, Bookmark } from 'lucide-react';
-import { editorialData } from '@/lib/mock-data';
-import { Story } from '@/lib/types';
+import { Search, Filter, CheckCircle2, Clock, X, Bookmark, Loader2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { supabase, isSupabaseConfigured } from '@/lib/db';
 
 const dispositionColors: Record<string, string> = {
   use_this_week: 'bg-green-500/10 text-green-400 border-green-500/30',
@@ -11,7 +11,33 @@ const dispositionColors: Record<string, string> = {
 };
 
 export function ResearchFeedPage() {
-  const stories = editorialData.stories;
+  const [stories, setStories] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadStories() {
+      if (isSupabaseConfigured && supabase) {
+        const { data } = await supabase.from('stories').select('*').order('detected_date', { ascending: false });
+        if (data) setStories(data);
+      }
+      setLoading(false);
+    }
+    loadStories();
+  }, []);
+
+  const handleDisposition = async (storyId: string, disposition: string) => {
+    if (!supabase) return;
+    await supabase.from('stories').update({ disposition }).eq('id', storyId);
+    setStories(stories.map(s => s.id === storyId ? { ...s, disposition } : s));
+  };
+
+  if (loading) {
+    return (
+      <div className="flex h-96 items-center justify-center">
+        <Loader2 className="animate-spin text-[var(--accent)]" size={32} />
+      </div>
+    );
+  }
 
   return (
     <div className="p-8">
@@ -39,14 +65,14 @@ export function ResearchFeedPage() {
       {/* Story Cards */}
       <div className="space-y-4">
         {stories.map((story) => (
-          <StoryCard key={story.id} story={story} />
+          <StoryCard key={story.id} story={story} onDisposition={handleDisposition} />
         ))}
       </div>
     </div>
   );
 }
 
-function StoryCard({ story }: { story: Story }) {
+function StoryCard({ story, onDisposition }: { story: any; onDisposition: (id: string, d: string) => void }) {
   return (
     <div className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] p-5">
       <div className="flex items-start justify-between">
@@ -63,7 +89,7 @@ function StoryCard({ story }: { story: Story }) {
             <p className="text-sm"><span className="font-medium">Why it matters:</span> {story.why_it_matters}</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            {story.tags?.map(tag => (
+            {story.tags?.map((tag: string) => (
               <span key={tag} className="rounded-full bg-[var(--bg-soft)] px-2 py-0.5 text-xs text-[var(--text-secondary)]">
                 {tag}
               </span>
@@ -82,7 +108,7 @@ function StoryCard({ story }: { story: Story }) {
           
           {/* Overall */}
           <div className="text-center">
-            <div className="text-2xl font-semibold text-[var(--accent)]">{story.overall_score?.toFixed(1)}</div>
+            <div className="text-2xl font-semibold text-[var(--accent)]">{Number(story.overall_score || 0).toFixed(1)}</div>
             <div className="text-xs text-[var(--text-muted)]">Overall</div>
           </div>
         </div>
@@ -91,20 +117,41 @@ function StoryCard({ story }: { story: Story }) {
       {/* Actions */}
       <div className="mt-4 flex items-center justify-between border-t border-[var(--line)] pt-4">
         <div className="flex items-center gap-2">
-          <span className={`rounded-full border px-3 py-1 text-xs font-medium ${dispositionColors[story.disposition]}`}>
-            {story.disposition.replace('_', ' ')}
+          <span className={`rounded-full border px-3 py-1 text-xs font-medium ${dispositionColors[story.disposition] || dispositionColors.save_for_later}`}>
+            {story.disposition?.replace('_', ' ') || 'save for later'}
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <button className="flex items-center gap-1 rounded-lg bg-green-500/10 px-3 py-1.5 text-xs font-medium text-green-400 hover:bg-green-500/20">
+          <button 
+            onClick={() => onDisposition(story.id, 'use_this_week')}
+            className={`flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+              story.disposition === 'use_this_week' 
+                ? 'bg-green-500/20 text-green-400' 
+                : 'bg-green-500/10 text-green-400 hover:bg-green-500/20'
+            }`}
+          >
             <CheckCircle2 size={14} />
             Use This Week
           </button>
-          <button className="flex items-center gap-1 rounded-lg bg-[var(--bg-soft)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--line)]">
+          <button 
+            onClick={() => onDisposition(story.id, 'save_for_later')}
+            className={`flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+              story.disposition === 'save_for_later' 
+                ? 'bg-blue-500/20 text-blue-400' 
+                : 'bg-[var(--bg-soft)] text-[var(--text-secondary)] hover:bg-[var(--line)]'
+            }`}
+          >
             <Bookmark size={14} />
             Save for Later
           </button>
-          <button className="flex items-center gap-1 rounded-lg bg-[var(--bg-soft)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--line)]">
+          <button 
+            onClick={() => onDisposition(story.id, 'ignore')}
+            className={`flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+              story.disposition === 'ignore' 
+                ? 'bg-gray-500/20 text-gray-400' 
+                : 'bg-[var(--bg-soft)] text-[var(--text-secondary)] hover:bg-[var(--line)]'
+            }`}
+          >
             <X size={14} />
             Ignore
           </button>

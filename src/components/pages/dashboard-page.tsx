@@ -8,15 +8,12 @@ import {
   TrendingUp,
   Clock,
   AlertCircle,
-  ChevronRight
+  ChevronRight,
+  Loader2
 } from 'lucide-react';
 import Link from 'next/link';
-import { editorialData } from '@/lib/mock-data';
-
-const currentIssue = editorialData.issues.find(i => i.status !== 'archived');
-const shortlistedStories = editorialData.stories.filter(s => s.disposition === 'use_this_week');
-const openReviewItems = editorialData.reviewItems.filter(r => r.status !== 'resolved');
-const checklist = editorialData.checklist.filter(c => c.issue_id === currentIssue?.id);
+import { useEffect, useState } from 'react';
+import { supabase, isSupabaseConfigured } from '@/lib/db';
 
 const pipelineSteps = [
   { id: 'signals', label: 'Signals Gathered', status: 'completed' },
@@ -28,28 +25,55 @@ const pipelineSteps = [
 ];
 
 export function DashboardPage() {
-  const completedChecklist = checklist.filter(c => c.is_complete).length;
-  const totalChecklist = checklist.length;
+  const [issues, setIssues] = useState<any[]>([]);
+  const [stories, setStories] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadData() {
+      if (isSupabaseConfigured && supabase) {
+        const [issuesRes, storiesRes] = await Promise.all([
+          supabase.from('issues').select('*').neq('status', 'archived').order('created_at', { ascending: false }).limit(1),
+          supabase.from('stories').select('*').eq('disposition', 'use_this_week')
+        ]);
+        if (issuesRes.data) setIssues(issuesRes.data);
+        if (storiesRes.data) setStories(storiesRes.data);
+      }
+      setLoading(false);
+    }
+    loadData();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex h-96 items-center justify-center">
+        <Loader2 className="animate-spin text-[var(--accent)]" size={32} />
+      </div>
+    );
+  }
+
+  const currentIssue = issues[0];
+  const shortlistedStories = stories;
 
   return (
     <div className="p-8">
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-2xl font-semibold">Dashboard</h1>
-        <p className="text-[var(--text-secondary)]">Week of March 23, 2026</p>
+        <p className="text-[var(--text-secondary)]">Week of March 25, 2026</p>
       </div>
 
       {/* KPI Cards */}
       <div className="mb-8 grid grid-cols-6 gap-4">
         <KpiCard 
           label="Current Issue" 
-          value="#001" 
+          value={currentIssue ? `#${currentIssue.issue_number}` : '—'} 
           icon={FileText}
-          status="in_review"
+          status={currentIssue?.status || 'none'}
         />
         <KpiCard 
           label="Signals Collected" 
-          value="12" 
+          value={stories.length.toString()} 
           icon={Search}
         />
         <KpiCard 
@@ -64,12 +88,12 @@ export function DashboardPage() {
         />
         <KpiCard 
           label="LinkedIn Status" 
-          value="Drafted" 
+          value={currentIssue?.linkedin_status?.replace('_', ' ') || '—'} 
           icon={Linkedin}
         />
         <KpiCard 
           label="Publish Status" 
-          value="Review" 
+          value={currentIssue?.status?.replace('_', ' ') || '—'} 
           icon={Clock}
         />
       </div>
@@ -113,8 +137,8 @@ export function DashboardPage() {
         <div className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] p-6">
           <h2 className="mb-4 text-lg font-medium">Quick Actions</h2>
           <div className="space-y-2">
-            <Link href="/issues/issue-001" className="flex items-center justify-between rounded-lg bg-[var(--bg-soft)] p-3 text-sm hover:bg-[var(--line)]">
-              <span>Review Current Issue</span>
+            <Link href="/issues" className="flex items-center justify-between rounded-lg bg-[var(--bg-soft)] p-3 text-sm hover:bg-[var(--line)]">
+              <span>View All Issues</span>
               <ChevronRight size={16} />
             </Link>
             <Link href="/research-feed" className="flex items-center justify-between rounded-lg bg-[var(--bg-soft)] p-3 text-sm hover:bg-[var(--line)]">
@@ -133,83 +157,43 @@ export function DashboardPage() {
         {/* Story Shortlist */}
         <div className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] p-6">
           <h2 className="mb-4 text-lg font-medium">Story Shortlist</h2>
-          <div className="space-y-3">
-            {shortlistedStories.slice(0, 5).map((story, idx) => (
-              <div key={story.id} className="flex items-start gap-3 rounded-lg bg-[var(--bg-soft)] p-3">
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--accent)]/10 text-xs font-medium text-[var(--accent)]">
-                  {idx + 1}
-                </span>
-                <div className="flex-1">
-                  <p className="text-sm font-medium">{story.title}</p>
-                  <p className="text-xs text-[var(--text-muted)]">{story.source_name}</p>
-                </div>
-                <span className={`rounded px-2 py-0.5 text-xs font-medium ${
-                  story.overall_score && story.overall_score >= 7
-                    ? 'bg-[var(--success)]/10 text-[var(--success)]'
-                    : 'bg-[var(--warning)]/10 text-[var(--warning)]'
-                }`}>
-                  {story.overall_score?.toFixed(1)}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Review Queue */}
-        <div className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] p-6">
-          <h2 className="mb-4 text-lg font-medium">Review Queue</h2>
-          {openReviewItems.length === 0 ? (
-            <p className="text-sm text-[var(--text-muted)]">All items reviewed</p>
+          {shortlistedStories.length === 0 ? (
+            <p className="text-sm text-[var(--text-muted)]">No shortlisted stories yet.</p>
           ) : (
             <div className="space-y-3">
-              {openReviewItems.map(item => (
-                <div key={item.id} className="flex items-start gap-3 rounded-lg bg-[var(--bg-soft)] p-3">
-                  <AlertCircle size={16} className={item.priority === 'critical' ? 'text-[var(--danger)]' : 'text-[var(--warning)]'} />
+              {shortlistedStories.slice(0, 5).map((story, idx) => (
+                <div key={story.id} className="flex items-start gap-3 rounded-lg bg-[var(--bg-soft)] p-3">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--accent)]/10 text-xs font-medium text-[var(--accent)]">
+                    {idx + 1}
+                  </span>
                   <div className="flex-1">
-                    <p className="text-sm font-medium">{item.label}</p>
-                    <p className="text-xs text-[var(--text-muted)]">{item.description}</p>
+                    <p className="text-sm font-medium">{story.title}</p>
+                    <p className="text-xs text-[var(--text-muted)]">{story.source_name}</p>
                   </div>
-                  <span className={`rounded px-2 py-0.5 text-xs ${
-                    item.priority === 'critical' 
-                      ? 'bg-[var(--danger)]/10 text-[var(--danger)]'
+                  <span className={`rounded px-2 py-0.5 text-xs font-medium ${
+                    story.overall_score && story.overall_score >= 7
+                      ? 'bg-[var(--success)]/10 text-[var(--success)]'
                       : 'bg-[var(--warning)]/10 text-[var(--warning)]'
                   }`}>
-                    {item.priority}
+                    {story.overall_score?.toFixed(1)}
                   </span>
                 </div>
               ))}
             </div>
           )}
         </div>
+
+        {/* Review Queue */}
+        <div className="rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] p-6">
+          <h2 className="mb-4 text-lg font-medium">Review Queue</h2>
+          <p className="text-sm text-[var(--text-muted)]">All items reviewed</p>
+        </div>
       </div>
 
       {/* Publish Readiness */}
       <div className="mt-6 rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] p-6">
         <h2 className="mb-4 text-lg font-medium">Publish Readiness Checklist</h2>
-        <div className="grid grid-cols-7 gap-4">
-          {checklist.map(item => (
-            <div key={item.id} className="text-center">
-              <div className={`mx-auto mb-2 flex h-8 w-8 items-center justify-center rounded-full ${
-                item.is_complete ? 'bg-[var(--success)]/10' : 'bg-[var(--bg-soft)]'
-              }`}>
-                {item.is_complete ? (
-                  <CheckCircle2 size={16} className="text-[var(--success)]" />
-                ) : (
-                  <Clock size={16} className="text-[var(--text-muted)]" />
-                )}
-              </div>
-              <p className="text-xs text-[var(--text-secondary)]">{item.item_label}</p>
-            </div>
-          ))}
-        </div>
-        <div className="mt-4 flex items-center justify-between">
-          <span className="text-sm text-[var(--text-secondary)]">
-            {completedChecklist}/{totalChecklist} complete
-          </span>
-          <button className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--bg)] hover:bg-[var(--accent-strong)]">
-            Mark Approved
-          </button>
-        </div>
+        <p className="text-sm text-[var(--text-muted)]">Connect Supabase to enable checklist tracking.</p>
       </div>
     </div>
   );
